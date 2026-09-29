@@ -25,7 +25,11 @@ func NewScheduler() *Scheduler {
 	}
 }
 
-func (s *Scheduler) AddJob(name string, interval time.Duration, task func()) {
+func (s *Scheduler) AddJob(
+	name string,
+	interval time.Duration,
+	task func(),
+) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -37,16 +41,21 @@ func (s *Scheduler) AddJob(name string, interval time.Duration, task func()) {
 	}
 
 	s.jobs = append(s.jobs, job)
+
+	fmt.Println("Job added:", name)
 }
 
 func (s *Scheduler) Start() {
 	s.mu.Lock()
+
 	jobsCopy := make([]*Job, len(s.jobs))
 	copy(jobsCopy, s.jobs)
+
 	s.mu.Unlock()
 
 	for _, job := range jobsCopy {
 		s.wg.Add(1)
+
 		go s.run(job)
 	}
 }
@@ -54,28 +63,105 @@ func (s *Scheduler) Start() {
 func (s *Scheduler) run(job *Job) {
 	defer s.wg.Done()
 
-	for {
-		start := time.Now()
-		// Run the task concurrently
-		go job.Task()
+	ticker := time.NewTicker(job.Interval)
+	defer ticker.Stop()
 
-		// Wait for next interval or stop signal
+	fmt.Println("Job started:", job.Name)
+
+	// Run immediately when the job starts.
+	go job.Task()
+
+	for {
 		select {
+
 		case <-job.stop:
-			fmt.Println("Stopped:", job.Name)
+			fmt.Println("Job stopped:", job.Name)
 			return
-		case <-time.After(job.Interval - time.Since(start)):
-			// continue loop
+
+		case <-ticker.C:
+			// Run task concurrently.
+			go job.Task()
 		}
 	}
 }
 
 func (s *Scheduler) Stop() {
 	s.mu.Lock()
+
 	for _, job := range s.jobs {
-		close(job.stop)
+		select {
+		case <-job.stop:
+			// Already stopped.
+		default:
+			close(job.stop)
+		}
 	}
+
 	s.mu.Unlock()
 
 	s.wg.Wait()
+
+	fmt.Println("Scheduler stopped")
+	fmt.Println("=========")
+}
+
+func main() {
+
+	scheduler := NewScheduler()
+
+	// Job 1
+	scheduler.AddJob(
+		"Email Job",
+		2*time.Second,
+		func() {
+			fmt.Println(
+				"Sending emails:",
+				time.Now().Format("15:04:05"),
+			)
+
+			time.Sleep(500 * time.Millisecond)
+
+			fmt.Println("Email job completed")
+		},
+	)
+
+	// Job 2
+	scheduler.AddJob(
+		"Database Backup",
+		5*time.Second,
+		func() {
+			fmt.Println(
+				"Running database backup:",
+				time.Now().Format("15:04:05"),
+			)
+
+			time.Sleep(1 * time.Second)
+
+			fmt.Println("Database backup completed")
+		},
+	)
+
+	// Job 3
+	scheduler.AddJob(
+		"Health Check",
+		3*time.Second,
+		func() {
+			fmt.Println(
+				"Health check:",
+				time.Now().Format("15:04:05"),
+			)
+		},
+	)
+
+	// Start all jobs
+	scheduler.Start()
+
+	// Let scheduler run for 15 seconds
+	time.Sleep(15 * time.Second)
+	fmt.Println("run...")
+
+	// Stop all jobs
+	scheduler.Stop()
+
+	fmt.Println("Application finished")
 }
